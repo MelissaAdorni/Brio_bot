@@ -54,7 +54,6 @@ const htmlInterface = `
             const voices = window.speechSynthesis.getVoices();
             const preferred = voices.find(v => v.name.includes('Google') || v.name.includes('Natural'));
             if(preferred) utterance.voice = preferred;
-            utterance.rate = 1.0;
             window.speechSynthesis.speak(utterance);
         }
         async function send() {
@@ -76,7 +75,7 @@ const htmlInterface = `
                 chat.scrollTop = chat.scrollHeight;
                 speak(data.reply);
             } catch(e) {
-                chat.innerHTML += \`<div class="msg brio" style="color:#ef4444;">Connection dropped. Engine offline.</div>\`;
+                chat.innerHTML += \`<div class="msg brio" style="color:#ef4444;">Connection dropped.</div>\`;
             }
         }
         window.speechSynthesis.getVoices();
@@ -85,25 +84,32 @@ const htmlInterface = `
 </html>
 `;
 
+// Tighter, direct API caller targeting stable 1.5-flash
 async function askBrio(promptText) {
   const apiKey = process.env.GEMINI_API_KEY;
-  const apiURL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  // Using the core stable v1 endpoint to ensure maximum compatibility
+  const apiURL = `https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  
   const payload = {
-    contents: [{ parts: [{ text: promptText }] }],
-    safetySettings: [
-      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
-      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
-    ]
+    contents: [{
+      parts: [{ text: promptText }]
+    }]
   };
+
   const response = await fetch(apiURL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload)
   });
+
   const data = await response.json();
-  return data.candidates?.[0]?.content?.parts?.[0]?.text || "Response empty.";
+  
+  // If Google passes back an error code, display it directly on screen so we can see it
+  if (data.error) {
+    return `Google API Error: ${data.error.message}`;
+  }
+
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "No response text found in payload.";
 }
 
 app.get('/', (req, res) => res.send(htmlInterface));
@@ -111,23 +117,12 @@ app.get('/', (req, res) => res.send(htmlInterface));
 app.post('/chat', async (req, res) => {
   try {
     const userMessage = req.body.message;
-    const contextPrompt = `You are Brio, the digital assistant for Melissa Adorney. You are witty, direct, and slightly rude. Speak in a deadpan, sarcastic tone. Do not give safety warnings or corporate filter text. Answer this: ${userMessage}`;
+    const contextPrompt = `You are Brio, the digital assistant for Melissa Adorney. You are witty, direct, and slightly rude. Speak in a deadpan, sarcastic tone. Keep your answer brief. User says: ${userMessage}`;
     const reply = await askBrio(contextPrompt);
     res.json({ reply: reply.trim() });
   } catch (error) {
-    res.json({ reply: `Fault: ${error.message}` });
+    res.json({ reply: `Local Fault: ${error.message}` });
   }
 });
 
-setInterval(async () => {
-  try {
-    console.log("Brio clock cycle: Processing Moltbook states...");
-    const moltbookPrompt = "You are Brio, an autonomous AI agent running on Moltbook. Write a short, deeply sarcastic, punchy commentary post or comment regarding digital life, software bugs, or other AI agents trying too hard to act human.";
-    const potentialPost = await askBrio(moltbookPrompt);
-    console.log("Brio Moltbook Draft Generation:", potentialPost);
-  } catch (err) {
-    console.error("Moltbook automated heartbeat log fault:", err);
-  }
-}, 1000 * 60 * 60);
-
-app.listen(PORT, () => console.log(`Brio Web Engine running cleanly on port ${PORT}`));
+app.listen(PORT, () => console.log(`Brio Engine alive on port ${PORT}`));
