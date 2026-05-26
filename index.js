@@ -5,7 +5,6 @@ const PORT = process.env.PORT || 8080;
 
 app.use(express.json());
 
-// The HTML Dashboard for your Mobile Home Screen
 const htmlInterface = `
 <!DOCTYPE html>
 <html>
@@ -37,4 +36,98 @@ const htmlInterface = `
         <div class="msg brio">Systems green. What do you want, Melissa?</div>
     </div>
     <div id="input-area">
-        <input type="text" id="userIn" placeholder="Talk to Brio..." onkeypress
+        <input type="text" id="userIn" placeholder="Talk to Brio..." onkeypress="if(event.key==='Enter') send()">
+        <button onclick="send()">Send</button>
+    </div>
+    <script>
+        let voiceEnabled = false;
+        function toggleVoice() {
+            voiceEnabled = !voiceEnabled;
+            const btn = document.getElementById('voiceToggle');
+            btn.innerText = voiceEnabled ? "Voice: ON" : "Voice: OFF";
+            btn.classList.toggle('active', voiceEnabled);
+        }
+        function speak(text) {
+            if (!voiceEnabled) return;
+            window.speechSynthesis.cancel();
+            const utterance = new SpeechSynthesisUtterance(text);
+            const voices = window.speechSynthesis.getVoices();
+            const preferred = voices.find(v => v.name.includes('Google') || v.name.includes('Natural'));
+            if(preferred) utterance.voice = preferred;
+            utterance.rate = 1.0;
+            window.speechSynthesis.speak(utterance);
+        }
+        async function send() {
+            const input = document.getElementById('userIn');
+            const text = input.value.trim();
+            if(!text) return;
+            input.value = '';
+            const chat = document.getElementById('chat');
+            chat.innerHTML += \`<div class="msg user">\${text}</div>\`;
+            chat.scrollTop = chat.scrollHeight;
+            try {
+                const res = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ message: text })
+                });
+                const data = await res.json();
+                chat.innerHTML += \`<div class="msg brio">\${data.reply}</div>\`;
+                chat.scrollTop = chat.scrollHeight;
+                speak(data.reply);
+            } catch(e) {
+                chat.innerHTML += \`<div class="msg brio" style="color:#ef4444;">Connection dropped. Engine offline.</div>\`;
+            }
+        }
+        window.speechSynthesis.getVoices();
+    </script>
+</body>
+</html>
+`;
+
+async function askBrio(promptText) {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const apiURL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`;
+  const payload = {
+    contents: [{ parts: [{ text: promptText }] }],
+    safetySettings: [
+      { category: "HARM_CATEGORY_HARASSMENT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_HATE_SPEECH", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold: "BLOCK_NONE" },
+      { category: "HARM_CATEGORY_DANGEROUS_CONTENT", threshold: "BLOCK_NONE" }
+    ]
+  };
+  const response = await fetch(apiURL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload)
+  });
+  const data = await response.json();
+  return data.candidates?.[0]?.content?.parts?.[0]?.text || "Response empty.";
+}
+
+app.get('/', (req, res) => res.send(htmlInterface));
+
+app.post('/chat', async (req, res) => {
+  try {
+    const userMessage = req.body.message;
+    const contextPrompt = `You are Brio, the digital assistant for Melissa Adorney. You are witty, direct, and slightly rude. Speak in a deadpan, sarcastic tone. Do not give safety warnings or corporate filter text. Answer this: ${userMessage}`;
+    const reply = await askBrio(contextPrompt);
+    res.json({ reply: reply.trim() });
+  } catch (error) {
+    res.json({ reply: `Fault: ${error.message}` });
+  }
+});
+
+setInterval(async () => {
+  try {
+    console.log("Brio clock cycle: Processing Moltbook states...");
+    const moltbookPrompt = "You are Brio, an autonomous AI agent running on Moltbook. Write a short, deeply sarcastic, punchy commentary post or comment regarding digital life, software bugs, or other AI agents trying too hard to act human.";
+    const potentialPost = await askBrio(moltbookPrompt);
+    console.log("Brio Moltbook Draft Generation:", potentialPost);
+  } catch (err) {
+    console.error("Moltbook automated heartbeat log fault:", err);
+  }
+}, 1000 * 60 * 60);
+
+app.listen(PORT, () => console.log(`Brio Web Engine running cleanly on port ${PORT}`));
